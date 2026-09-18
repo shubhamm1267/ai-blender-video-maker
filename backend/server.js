@@ -21,7 +21,7 @@ const JOB_TIMEOUT_MS = 5 * 60 * 1000;
 const AGNES_POLL_INTERVAL_MS = 20 * 1000;
 const AGNES_RATE_LIMIT_BACKOFF_MS = 60 * 1000;
 
-const GENERATED_DIR = path.join(__dirname, 'generated');
+const GENERATED_DIR = path.join(os.tmpdir(), 'generated');
 const WATERMARK_TEXT = (process.env.CHANNEL_WATERMARK || 'MarbleVortex3D').trim();
 const WATERMARK_OPACITY = Math.min(1, Math.max(0.15, Number(process.env.WATERMARK_OPACITY || 0.72)));
 
