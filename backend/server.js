@@ -1,4 +1,5 @@
 const path = require('path');
+
 require('dotenv').config({
   path: path.join(__dirname, '.env')
 });
@@ -22,16 +23,28 @@ const {
 } = require('./prompt-routes');
 
 const app = express();
-const PORT = process.env.PORT || 3000;
 
-const JOB_TIMEOUT_MS = 5 * 60 * 1000;
-const AGNES_POLL_INTERVAL_MS = 20 * 1000;
-const AGNES_RATE_LIMIT_BACKOFF_MS = 60 * 1000;
+const PORT =
+  process.env.PORT || 3000;
 
-const GENERATED_DIR = path.join(
-  os.tmpdir(),
-  'generated'
-);
+const JOB_TIMEOUT_MS =
+  5 * 60 * 1000;
+
+const AGNES_POLL_INTERVAL_MS =
+  20 * 1000;
+
+const AGNES_RATE_LIMIT_BACKOFF_MS =
+  60 * 1000;
+
+const GENERATED_DIR =
+  path.join(
+    os.tmpdir(),
+    'generated'
+  );
+
+// ============================================================
+// CREATE GENERATED DIRECTORY
+// ============================================================
 
 fs.mkdirSync(
   GENERATED_DIR,
@@ -40,9 +53,9 @@ fs.mkdirSync(
   }
 );
 
-/* =========================================================
-   MIDDLEWARE
-========================================================= */
+// ============================================================
+// MIDDLEWARE
+// ============================================================
 
 app.use(
   cors()
@@ -54,9 +67,9 @@ app.use(
   })
 );
 
-/* =========================================================
-   GENERATED VIDEO FILES
-========================================================= */
+// ============================================================
+// GENERATED VIDEO FILES
+// ============================================================
 
 app.use(
   '/generated',
@@ -80,22 +93,27 @@ app.use(
   )
 );
 
-/* =========================================================
-   JOB STORAGE
-========================================================= */
+// ============================================================
+// JOB STORAGE
+// ============================================================
 
 const jobs = new Map();
 
-/* =========================================================
-   STATUS MAPPING
-========================================================= */
+// ============================================================
+// STATUS MAPPING
+// ============================================================
 
-function mapStatus(agnesStatus) {
+function mapStatus(
+  agnesStatus
+) {
   switch (agnesStatus) {
     case 'queued':
       return 'pending';
 
     case 'in_progress':
+      return 'processing';
+
+    case 'processing':
       return 'processing';
 
     case 'completed':
@@ -109,22 +127,9 @@ function mapStatus(agnesStatus) {
   }
 }
 
-/* =========================================================
-   ABSOLUTE VIDEO URL
-========================================================= */
-
-/*
-  Frontend is hosted on Netlify and backend is hosted
-  separately on Vercel.
-
-  Therefore:
-
-  /generated/video.mp4
-
-  needs to become:
-
-  https://backend-domain.vercel.app/generated/video.mp4
-*/
+// ============================================================
+// ABSOLUTE VIDEO URL
+// ============================================================
 
 function makeAbsoluteVideoUrl(
   req,
@@ -134,25 +139,29 @@ function makeAbsoluteVideoUrl(
     return null;
   }
 
-  /*
-    If already an absolute URL,
-    return it directly.
-  */
-
+  // Already absolute URL
   if (
-    /^https?:\/\//i.test(videoUrl)
+    /^https?:\/\//i.test(
+      videoUrl
+    )
   ) {
     return videoUrl;
   }
 
   const protocol =
-    req.headers['x-forwarded-proto'] ||
-    (req.secure
-      ? 'https'
-      : 'http');
+    req.headers[
+      'x-forwarded-proto'
+    ] ||
+    (
+      req.secure
+        ? 'https'
+        : 'http'
+    );
 
   const host =
-    req.headers['x-forwarded-host'] ||
+    req.headers[
+      'x-forwarded-host'
+    ] ||
     req.get('host');
 
   const normalizedPath =
@@ -163,20 +172,23 @@ function makeAbsoluteVideoUrl(
   return `${protocol}://${host}${normalizedPath}`;
 }
 
-/* =========================================================
-   CLIENT RESPONSE
-========================================================= */
+// ============================================================
+// CLIENT RESPONSE
+// ============================================================
 
 function toClientResponse(
   job,
   req
 ) {
   return {
-    jobId: job.jobId,
+    jobId:
+      job.jobId,
 
-    status: job.status,
+    status:
+      job.status,
 
-    progress: job.progress,
+    progress:
+      job.progress,
 
     videoUrl:
       makeAbsoluteVideoUrl(
@@ -184,59 +196,57 @@ function toClientResponse(
         job.videoUrl
       ),
 
-    error: job.error
+    error:
+      job.error
   };
 }
 
-/* =========================================================
-   PHYSICS-DIRECTED PROMPT
-========================================================= */
+// ============================================================
+// PHYSICS-DIRECTED PROMPT
+// ============================================================
 
 function buildPhysicsDirectedPrompt(
   userPrompt
 ) {
   return `
 PHYSICS-DIRECTED VIDEO SPECIFICATION:
-Create the scene as one continuous, physically coherent 12-second shot. Treat
-gravity, mass, inertia, friction, collision response, contact forces and
-momentum as real constraints. Every moving object must remain supported by
-visible geometry or a continuous fluid/particle path. No floating, teleporting,
-popping, clipping through surfaces, impossible acceleration, or unexplained
-direction changes. Keep object dimensions, material properties and relative
-positions consistent from frame to frame. Rolling objects should visibly rotate
-in proportion to their travel distance and should roll without slipping when
-traction permits. Impacts must show believable momentum transfer, contact
-deformation or rebound, and small secondary vibrations when appropriate.
-Mechanical parts must remain meshed and driven by their contacts. Camera is
-locked unless motion is explicitly requested. Prioritize temporal consistency,
-stable geometry and realistic motion over decorative effects.
+
+Create the scene as one continuous, physically coherent 12-second shot. Treat gravity, mass, inertia, friction, collision response, contact forces and momentum as real constraints. Every moving object must remain supported by visible geometry or a continuous fluid/particle path. No floating, teleporting, popping, clipping through surfaces, impossible acceleration, or unexplained direction changes. Keep object dimensions, material properties and relative positions consistent from frame to frame. Rolling objects should visibly rotate in proportion to their travel distance and should roll without slipping when traction permits. Impacts must show believable momentum transfer, contact deformation or rebound, and small secondary vibrations when appropriate. Mechanical parts must remain meshed and driven by their contacts. Camera is locked unless motion is explicitly requested. Prioritize temporal consistency, stable geometry and realistic motion over decorative effects.
 
 USER CREATIVE BRIEF:
+
 ${userPrompt.trim()}
 `.trim();
 }
 
-/* =========================================================
-   DOWNLOAD VIDEO
-========================================================= */
+// ============================================================
+// DOWNLOAD VIDEO
+// ============================================================
 
 async function downloadFile(
   url,
   target
 ) {
+  console.log(
+    `[download] Starting download: ${url}`
+  );
+
   const response =
     await axios.get(
       url,
       {
-        responseType: 'stream',
+        responseType:
+          'stream',
 
-        timeout: 120000,
+        timeout:
+          120000,
 
-        maxRedirects: 5,
+        maxRedirects:
+          5,
 
         headers: {
           'User-Agent':
-            'MarbleVortex3D-LocalVideoRenderer/1.0'
+            'AI-Blender-Video-Maker/1.0'
         }
       }
     );
@@ -248,7 +258,9 @@ async function downloadFile(
           target
         );
 
-      response.data.pipe(out);
+      response.data.pipe(
+        out
+      );
 
       response.data.on(
         'error',
@@ -266,10 +278,6 @@ async function downloadFile(
       );
     }
   );
-
-  /*
-    Verify downloaded file.
-  */
 
   const stat =
     await fsp.stat(
@@ -294,24 +302,17 @@ async function downloadFile(
   );
 }
 
-/* =========================================================
-   SAVE VIDEO WITHOUT WATERMARK
-========================================================= */
-
-/*
-  IMPORTANT:
-
-  There is NO:
-  - Sharp
-  - FFmpeg
-  - watermark PNG
-  - overlay
-  - drawtext
-  - font
-  - watermark rendering
-
-  Agnes video is simply downloaded and served.
-*/
+// ============================================================
+// SAVE GENERATED VIDEO
+// ============================================================
+//
+// NO WATERMARK
+// NO FFMPEG
+// NO SHARP
+// NO DRAWTEXT
+//
+// Agnes generated video is downloaded directly.
+// ============================================================
 
 async function saveGeneratedVideo(
   sourceUrl,
@@ -330,10 +331,6 @@ async function saveGeneratedVideo(
     sourceUrl,
     outputPath
   );
-
-  /*
-    Verify final video exists.
-  */
 
   const stat =
     await fsp.stat(
@@ -357,17 +354,26 @@ async function saveGeneratedVideo(
   };
 }
 
-/* =========================================================
-   GENERATE VIDEO
-========================================================= */
+// ============================================================
+// GENERATE VIDEO
+// ============================================================
 
 app.post(
   '/api/generate',
-  async (req, res) => {
+  async (
+    req,
+    res
+  ) => {
+
     const prompt =
-      typeof req.body?.prompt === 'string'
+      typeof req.body?.prompt ===
+      'string'
         ? req.body.prompt.trim()
         : '';
+
+    // --------------------------------------------------------
+    // Validate prompt
+    // --------------------------------------------------------
 
     if (!prompt) {
       return res
@@ -378,7 +384,13 @@ app.post(
         });
     }
 
-    if (!process.env.AGNES_API_KEY) {
+    // --------------------------------------------------------
+    // Check API key
+    // --------------------------------------------------------
+
+    if (
+      !process.env.AGNES_API_KEY
+    ) {
       return res
         .status(500)
         .json({
@@ -388,6 +400,7 @@ app.post(
     }
 
     try {
+
       console.log(
         '========================================'
       );
@@ -400,6 +413,10 @@ app.post(
         '[generate] Prompt:',
         prompt
       );
+
+      // ------------------------------------------------------
+      // Create Agnes task
+      // ------------------------------------------------------
 
       const task =
         await createVideoTask(
@@ -416,6 +433,10 @@ app.post(
           2
         )
       );
+
+      // ------------------------------------------------------
+      // Create local job
+      // ------------------------------------------------------
 
       const jobId =
         crypto.randomUUID();
@@ -487,7 +508,9 @@ app.post(
               task.status
             )
         });
+
     } catch (err) {
+
       console.error(
         '[generate] Agnes AI error:',
         err
@@ -497,9 +520,9 @@ app.post(
         err.status === 429
           ? 429
           : err.status &&
-              err.status < 500
-            ? err.status
-            : 502;
+            err.status < 500
+          ? err.status
+          : 502;
 
       return res
         .status(status)
@@ -514,17 +537,25 @@ app.post(
   }
 );
 
-/* =========================================================
-   VIDEO STATUS
-========================================================= */
+// ============================================================
+// VIDEO STATUS
+// ============================================================
 
 app.get(
   '/api/status/:jobId',
-  async (req, res) => {
+  async (
+    req,
+    res
+  ) => {
+
     const job =
       jobs.get(
         req.params.jobId
       );
+
+    // --------------------------------------------------------
+    // Unknown job
+    // --------------------------------------------------------
 
     if (!job) {
       return res
@@ -535,9 +566,9 @@ app.get(
         });
     }
 
-    /*
-      Already completed.
-    */
+    // --------------------------------------------------------
+    // Already completed
+    // --------------------------------------------------------
 
     if (
       job.status ===
@@ -552,9 +583,9 @@ app.get(
       );
     }
 
-    /*
-      Already failed.
-    */
+    // --------------------------------------------------------
+    // Already failed
+    // --------------------------------------------------------
 
     if (
       job.status ===
@@ -568,19 +599,16 @@ app.get(
       );
     }
 
-    /*
-      Timeout protection.
-
-      Keeping the original 5-minute timeout
-      because this code was previously generating
-      correctly.
-    */
+    // --------------------------------------------------------
+    // Timeout protection
+    // --------------------------------------------------------
 
     if (
       Date.now() -
         job.createdAt >
       JOB_TIMEOUT_MS
     ) {
+
       job.status =
         'failed';
 
@@ -599,9 +627,9 @@ app.get(
       );
     }
 
-    /*
-      Do not call Agnes before next check time.
-    */
+    // --------------------------------------------------------
+    // Wait until next Agnes poll
+    // --------------------------------------------------------
 
     if (
       Date.now() <
@@ -616,6 +644,11 @@ app.get(
     }
 
     try {
+
+      // ------------------------------------------------------
+      // Get Agnes status
+      // ------------------------------------------------------
+
       const result =
         await getVideoStatus({
           videoId:
@@ -634,17 +667,17 @@ app.get(
         )
       );
 
-      /*
-        Schedule next Agnes check.
-      */
+      // ------------------------------------------------------
+      // Schedule next poll
+      // ------------------------------------------------------
 
       job.nextAgnesCheckAt =
         Date.now() +
         AGNES_POLL_INTERVAL_MS;
 
-      /*
-        Update status.
-      */
+      // ------------------------------------------------------
+      // Update status
+      // ------------------------------------------------------
 
       job.status =
         mapStatus(
@@ -654,37 +687,78 @@ app.get(
       job.progress =
         result.progress;
 
-      /*
-        =====================================================
-        VIDEO COMPLETED
-        =====================================================
-      */
+      // ======================================================
+      // VIDEO COMPLETED
+      // ======================================================
 
       if (
-        job.status ===
-          'completed' &&
-        result.videoUrl
+        result.status ===
+        'completed'
       ) {
-        job.progress =
-          95;
+
+        console.log(
+          '[video] Agnes reports COMPLETED.'
+        );
+
+        console.log(
+          '[video] Agnes video URL:',
+          result.videoUrl
+        );
+
+        // ----------------------------------------------------
+        // Completed but URL not available yet
+        // ----------------------------------------------------
+
+        if (
+          !result.videoUrl
+        ) {
+
+          console.warn(
+            '[video] Agnes says completed but returned no video URL.'
+          );
+
+          console.warn(
+            '[video] Will retry status request.'
+          );
+
+          job.status =
+            'processing';
+
+          job.progress =
+            95;
+
+          job.error =
+            null;
+
+          // Retry after 5 seconds
+          job.nextAgnesCheckAt =
+            Date.now() +
+            5000;
+
+          return res.json(
+            toClientResponse(
+              job,
+              req
+            )
+          );
+        }
+
+        // ----------------------------------------------------
+        // Store source URL
+        // ----------------------------------------------------
 
         job.sourceVideoUrl =
           result.videoUrl;
 
         console.log(
-          `[video] Agnes completed: ${result.videoUrl}`
+          `[video] Agnes source video: ${result.videoUrl}`
         );
 
+        // ----------------------------------------------------
+        // Download final video
+        // ----------------------------------------------------
+
         try {
-          /*
-            IMPORTANT:
-
-            Direct download only.
-
-            NO WATERMARK.
-            NO FFMPEG.
-            NO SHARP.
-          */
 
           const saved =
             await saveGeneratedVideo(
@@ -692,16 +766,12 @@ app.get(
               job.jobId
             );
 
-          /*
-            Store local generated URL.
-          */
+          // ----------------------------------------------
+          // Store generated URL
+          // ----------------------------------------------
 
           job.videoUrl =
             saved.videoUrl;
-
-          /*
-            Only NOW mark completed.
-          */
 
           job.status =
             'completed';
@@ -715,7 +785,15 @@ app.get(
           console.log(
             `[video] Final video ready: ${job.videoUrl}`
           );
-        } catch (downloadErr) {
+
+          console.log(
+            `[video] Source video: ${job.sourceVideoUrl}`
+          );
+
+        } catch (
+          downloadErr
+        ) {
+
           console.error(
             '[video] Download error:',
             downloadErr
@@ -736,28 +814,44 @@ app.get(
         }
       }
 
-      /*
-        =====================================================
-        AGNES FAILED
-        =====================================================
-      */
+      // ======================================================
+      // AGNES FAILED
+      // ======================================================
 
       if (
-        job.status ===
+        result.status ===
         'failed'
       ) {
+
+        job.status =
+          'failed';
+
         job.error =
           (
             result.error &&
             (
               result.error.message ||
-              JSON.stringify(
-                result.error
+              (
+                typeof result.error ===
+                'string'
+                  ? result.error
+                  : JSON.stringify(
+                      result.error
+                    )
               )
             )
           ) ||
           'Video generation failed on Agnes AI.';
+
+        console.error(
+          '[video] Agnes generation failed:',
+          job.error
+        );
       }
+
+      // ------------------------------------------------------
+      // Return status
+      // ------------------------------------------------------
 
       return res.json(
         toClientResponse(
@@ -765,22 +859,24 @@ app.get(
           req
         )
       );
+
     } catch (err) {
+
       console.error(
         '[status] Agnes AI error:',
         err
       );
 
-      /*
-        Authentication / invalid task errors
-        should fail immediately.
-      */
+      // ------------------------------------------------------
+      // Permanent errors
+      // ------------------------------------------------------
 
       if (
         err.status === 404 ||
         err.status === 401 ||
         err.status === 403
       ) {
+
         job.status =
           'failed';
 
@@ -795,17 +891,17 @@ app.get(
         );
       }
 
-      /*
-        Rate limit / temporary error.
-
-        Keep job alive.
-      */
+      // ------------------------------------------------------
+      // Temporary errors
+      // ------------------------------------------------------
 
       const backoffMs =
         err.status === 429
           ? Math.max(
-              (err.retryAfter || 0) *
-                1000,
+              (
+                err.retryAfter ||
+                0
+              ) * 1000,
 
               AGNES_RATE_LIMIT_BACKOFF_MS
             )
@@ -825,13 +921,17 @@ app.get(
   }
 );
 
-/* =========================================================
-   CONFIG
-========================================================= */
+// ============================================================
+// CONFIG
+// ============================================================
 
 app.get(
   '/api/config',
-  (_req, res) => {
+  (
+    _req,
+    res
+  ) => {
+
     res.json({
       watermark:
         null,
@@ -845,15 +945,20 @@ app.get(
   }
 );
 
-/* =========================================================
-   HEALTH CHECK
-========================================================= */
+// ============================================================
+// HEALTH CHECK
+// ============================================================
 
 app.get(
   '/api/health',
-  (_req, res) => {
+  (
+    _req,
+    res
+  ) => {
+
     res.json({
-      ok: true,
+      ok:
+        true,
 
       service:
         'ai-blender-video-maker',
@@ -867,21 +972,25 @@ app.get(
   }
 );
 
-/* =========================================================
-   PROMPT ROUTER
-========================================================= */
+// ============================================================
+// PROMPT ROUTER
+// ============================================================
 
 app.use(
   '/api/prompt',
   promptRouter
 );
 
-/* =========================================================
-   404
-========================================================= */
+// ============================================================
+// 404
+// ============================================================
 
 app.use(
-  (req, res) => {
+  (
+    req,
+    res
+  ) => {
+
     res
       .status(404)
       .json({
@@ -891,19 +1000,28 @@ app.use(
   }
 );
 
-/* =========================================================
-   START SERVER
-========================================================= */
+// ============================================================
+// START SERVER
+// ============================================================
 
 app.listen(
   PORT,
   () => {
+
     console.log(
       `✅ Text-to-Video backend running on http://localhost:${PORT}`
     );
 
     console.log(
       `🎬 Physics-directed generation: ON`
+    );
+
+    console.log(
+      `⏱️ Target video duration: ~12 seconds`
+    );
+
+    console.log(
+      `🎞️ FPS: 24`
     );
 
     console.log(
@@ -917,6 +1035,7 @@ app.listen(
     if (
       !process.env.AGNES_API_KEY
     ) {
+
       console.warn(
         '⚠️ AGNES_API_KEY is not set — add it to backend/.env before generating videos.'
       );

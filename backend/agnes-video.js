@@ -13,20 +13,141 @@ const REQUEST_TIMEOUT_MS = 30000;
 // VIDEO SETTINGS
 // ============================================================
 
-// 1152 x 768 resolution
 const VIDEO_WIDTH = 1152;
 const VIDEO_HEIGHT = 768;
 
-// 289 frames at 24 FPS
 // 289 / 24 = 12.04 seconds
 const VIDEO_FRAMES = 289;
 const VIDEO_FPS = 24;
+
+// ============================================================
+// AUTH
+// ============================================================
 
 function authHeaders() {
   return {
     Authorization: `Bearer ${process.env.AGNES_API_KEY}`,
     'Content-Type': 'application/json',
   };
+}
+
+// ============================================================
+// FIND VIDEO URL
+// ============================================================
+
+function extractVideoUrl(data) {
+  if (!data) {
+    return null;
+  }
+
+  // ----------------------------------------------------------
+  // Direct top-level fields
+  // ----------------------------------------------------------
+
+  const directCandidates = [
+    data.video_url,
+    data.url,
+    data.videoUrl,
+    data.output_url,
+    data.outputUrl,
+    data.download_url,
+    data.downloadUrl,
+    data.remixed_from_video_id,
+  ];
+
+  for (const value of directCandidates) {
+    if (
+      typeof value === 'string' &&
+      /^https?:\/\//i.test(value)
+    ) {
+      return value;
+    }
+  }
+
+  // ----------------------------------------------------------
+  // Common nested response fields
+  // ----------------------------------------------------------
+
+  const nestedObjects = [
+    data.data,
+    data.result,
+    data.output,
+    data.video,
+  ];
+
+  for (const obj of nestedObjects) {
+    if (!obj || typeof obj !== 'object') {
+      continue;
+    }
+
+    const nestedCandidates = [
+      obj.video_url,
+      obj.url,
+      obj.videoUrl,
+      obj.output_url,
+      obj.outputUrl,
+      obj.download_url,
+      obj.downloadUrl,
+      obj.remixed_from_video_id,
+    ];
+
+    for (const value of nestedCandidates) {
+      if (
+        typeof value === 'string' &&
+        /^https?:\/\//i.test(value)
+      ) {
+        return value;
+      }
+    }
+  }
+
+  // ----------------------------------------------------------
+  // Recursive fallback
+  // ----------------------------------------------------------
+
+  const visited = new Set();
+
+  function searchObject(obj) {
+    if (!obj || typeof obj !== 'object') {
+      return null;
+    }
+
+    if (visited.has(obj)) {
+      return null;
+    }
+
+    visited.add(obj);
+
+    for (const [key, value] of Object.entries(obj)) {
+      if (
+        typeof value === 'string' &&
+        /^https?:\/\//i.test(value) &&
+        (
+          /video/i.test(key) ||
+          /url/i.test(key) ||
+          /output/i.test(key) ||
+          /download/i.test(key)
+        )
+      ) {
+        return value;
+      }
+
+      if (
+        value &&
+        typeof value === 'object'
+      ) {
+        const found = searchObject(value);
+
+        if (found) {
+          return found;
+        }
+      }
+    }
+
+    return null;
+  }
+
+  return searchObject(data);
 }
 
 // ============================================================
@@ -39,14 +160,13 @@ async function createVideoTask(prompt) {
       model: MODEL,
       prompt: prompt,
 
-      // Video resolution
       width: VIDEO_WIDTH,
       height: VIDEO_HEIGHT,
 
       // Approximately 12 seconds
       num_frames: VIDEO_FRAMES,
 
-      // Keep normal 24 FPS
+      // Normal 24 FPS
       frame_rate: VIDEO_FPS,
     };
 
@@ -62,7 +182,9 @@ async function createVideoTask(prompt) {
     console.log('FPS:', VIDEO_FPS);
     console.log(
       'Expected duration:',
-      `${(VIDEO_FRAMES / VIDEO_FPS).toFixed(2)} seconds`
+      `${(
+        VIDEO_FRAMES / VIDEO_FPS
+      ).toFixed(2)} seconds`
     );
     console.log('========================================');
 
@@ -75,12 +197,29 @@ async function createVideoTask(prompt) {
       }
     );
 
-    console.log('Agnes create response:', data);
+    console.log(
+      'Agnes create response:',
+      JSON.stringify(
+        data,
+        null,
+        2
+      )
+    );
 
     return {
-      taskId: data.task_id || data.id || null,
-      videoId: data.video_id || null,
-      status: data.status || 'queued',
+      taskId:
+        data.task_id ||
+        data.id ||
+        null,
+
+      videoId:
+        data.video_id ||
+        null,
+
+      status:
+        data.status ||
+        'queued',
+
       progress:
         typeof data.progress === 'number'
           ? data.progress
@@ -95,12 +234,15 @@ async function createVideoTask(prompt) {
 // GET VIDEO STATUS
 // ============================================================
 
-async function getVideoStatus({ videoId, taskId }) {
+async function getVideoStatus({
+  videoId,
+  taskId,
+}) {
   try {
     let data;
 
     // --------------------------------------------------------
-    // Poll using video_id
+    // PRIMARY: Poll using video_id
     // --------------------------------------------------------
 
     if (videoId) {
@@ -111,10 +253,14 @@ async function getVideoStatus({ videoId, taskId }) {
             video_id: videoId,
             model_name: MODEL,
           },
+
           headers: {
-            Authorization: `Bearer ${process.env.AGNES_API_KEY}`,
+            Authorization:
+              `Bearer ${process.env.AGNES_API_KEY}`,
           },
-          timeout: REQUEST_TIMEOUT_MS,
+
+          timeout:
+            REQUEST_TIMEOUT_MS,
         }
       );
 
@@ -122,7 +268,7 @@ async function getVideoStatus({ videoId, taskId }) {
     }
 
     // --------------------------------------------------------
-    // Fallback: poll using task_id
+    // FALLBACK: Poll using task_id
     // --------------------------------------------------------
 
     else if (taskId) {
@@ -130,9 +276,12 @@ async function getVideoStatus({ videoId, taskId }) {
         `${AGNES_V1}/videos/${taskId}`,
         {
           headers: {
-            Authorization: `Bearer ${process.env.AGNES_API_KEY}`,
+            Authorization:
+              `Bearer ${process.env.AGNES_API_KEY}`,
           },
-          timeout: REQUEST_TIMEOUT_MS,
+
+          timeout:
+            REQUEST_TIMEOUT_MS,
         }
       );
 
@@ -145,34 +294,104 @@ async function getVideoStatus({ videoId, taskId }) {
       );
     }
 
-    console.log('Agnes status response:', data);
-
-    const status = data.status || 'in_progress';
-
     // --------------------------------------------------------
-    // Get completed video URL
+    // RAW RESPONSE LOG
     // --------------------------------------------------------
 
-    const videoUrl =
+    console.log(
+      '========================================'
+    );
+
+    console.log(
+      'Agnes status RAW response:'
+    );
+
+    console.log(
+      JSON.stringify(
+        data,
+        null,
+        2
+      )
+    );
+
+    console.log(
+      '========================================'
+    );
+
+    const status =
+      data?.status ||
+      data?.data?.status ||
+      data?.result?.status ||
+      'in_progress';
+
+    // --------------------------------------------------------
+    // VIDEO URL
+    // --------------------------------------------------------
+
+    let videoUrl = null;
+
+    if (
       status === 'completed'
-        ? data.video_url ||
-          data.url ||
-          data.remixed_from_video_id ||
-          null
-        : null;
+    ) {
+      videoUrl =
+        extractVideoUrl(data);
+
+      console.log(
+        '[Agnes] Extracted video URL:',
+        videoUrl
+      );
+
+      if (!videoUrl) {
+        console.error(
+          '[Agnes] WARNING: Video completed but no video URL was found.'
+        );
+      }
+    }
+
+    // --------------------------------------------------------
+    // PROGRESS
+    // --------------------------------------------------------
+
+    let progress = 0;
+
+    if (
+      status === 'completed'
+    ) {
+      progress = 100;
+    } else if (
+      typeof data?.progress === 'number'
+    ) {
+      progress = data.progress;
+    } else if (
+      typeof data?.data?.progress === 'number'
+    ) {
+      progress =
+        data.data.progress;
+    } else if (
+      typeof data?.result?.progress === 'number'
+    ) {
+      progress =
+        data.result.progress;
+    }
+
+    // --------------------------------------------------------
+    // ERROR
+    // --------------------------------------------------------
+
+    const error =
+      data?.error ||
+      data?.data?.error ||
+      data?.result?.error ||
+      null;
 
     return {
-      status: status,
-
-      progress:
-        typeof data.progress === 'number'
-          ? data.progress
-          : 0,
-
-      videoUrl: videoUrl,
-
-      error: data.error || null,
+      status,
+      progress,
+      videoUrl,
+      error,
+      raw: data,
     };
+
   } catch (err) {
     throw toAgnesError(err);
   }
@@ -188,18 +407,24 @@ function toAgnesError(err) {
   // --------------------------------------------------------
 
   if (err.response) {
-    const status = err.response.status;
+    const status =
+      err.response.status;
 
     const retryAfterHeader =
       err.response.headers
-        ? err.response.headers['retry-after']
+        ? err.response.headers[
+            'retry-after'
+          ]
         : undefined;
 
-    const retryAfter = retryAfterHeader
-      ? Number(retryAfterHeader)
-      : status === 429
-      ? 60
-      : undefined;
+    const retryAfter =
+      retryAfterHeader
+        ? Number(
+            retryAfterHeader
+          )
+        : status === 429
+        ? 60
+        : undefined;
 
     const messages = {
       400:
@@ -230,23 +455,31 @@ function toAgnesError(err) {
       messages[status] ||
       `Agnes AI request failed (HTTP ${status}).`;
 
-    const error = new Error(message);
+    const error =
+      new Error(message);
 
     error.status = status;
-    error.retryAfter = retryAfter;
-    error.details = err.response.data;
+    error.retryAfter =
+      retryAfter;
+
+    error.details =
+      err.response.data;
 
     return error;
   }
 
   // --------------------------------------------------------
-  // Request timeout
+  // Timeout
   // --------------------------------------------------------
 
-  if (err.code === 'ECONNABORTED') {
-    const error = new Error(
-      'Agnes AI request timed out.'
-    );
+  if (
+    err.code ===
+    'ECONNABORTED'
+  ) {
+    const error =
+      new Error(
+        'Agnes AI request timed out.'
+      );
 
     error.status = 504;
 
@@ -254,12 +487,13 @@ function toAgnesError(err) {
   }
 
   // --------------------------------------------------------
-  // Network / unknown error
+  // Network / unknown
   // --------------------------------------------------------
 
-  const error = new Error(
-    'Could not reach Agnes AI. Check your network connection.'
-  );
+  const error =
+    new Error(
+      'Could not reach Agnes AI. Check your network connection.'
+    );
 
   error.status = 502;
 
