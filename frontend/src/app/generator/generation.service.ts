@@ -13,7 +13,7 @@ export interface GenerationJob {
   error?: string | null;
 }
 
-const API_BASE = 'http://localhost:3000/api';
+const API_BASE = 'https://ai-blender-video-maker.vercel.app/api';
 const POLL_INTERVAL_MS = 3000;
 const MAX_POLL_ATTEMPTS = 100; // 100 * 3s = 5 minutes, matches the backend timeout
 
@@ -44,7 +44,7 @@ export class GenerationService {
         return this.http.get<GenerationJob>(`${API_BASE}/status/${jobId}`).pipe(
           switchMap((job) => {
             if (job.videoUrl && job.videoUrl.startsWith('/')) {
-              job.videoUrl = `http://localhost:3000${job.videoUrl}`;
+              job.videoUrl = `https://ai-blender-video-maker.vercel.app${job.videoUrl}`;
             }
             return new Observable<GenerationJob>((subscriber) => {
               subscriber.next(job);

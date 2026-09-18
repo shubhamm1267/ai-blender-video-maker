@@ -141,7 +141,7 @@ function toRichError(rawMessage, status) {
     err.hint = 'Wait a minute and try again, or check quota/billing in AI Studio.';
   } else if (status === 404) {
     err.friendly = 'That model name is not available for this key (404).';
-    err.hint = 'Open http://localhost:3000/api/prompt/models to see which models you can use.';
+    err.hint = 'Open https://ai-blender-video-maker.vercel.app/api/prompt/models to see which models you can use.';
   } else if (/fetch failed|ENOTFOUND|ETIMEDOUT|EAI_AGAIN/i.test(msg)) {
     err.friendly = 'Could not reach Google.';
     err.hint = 'Check your internet connection, VPN or firewall.';

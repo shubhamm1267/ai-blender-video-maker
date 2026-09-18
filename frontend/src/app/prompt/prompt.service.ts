@@ -3,7 +3,7 @@ import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { Observable, throwError } from 'rxjs';
 import { catchError } from 'rxjs/operators';
 
-const API_BASE = 'http://localhost:3000/api/prompt';
+const API_BASE = 'https://ai-blender-video-maker.vercel.app/api/prompt';
 
 export interface PromptResponse {
   prompt: string;
