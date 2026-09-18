@@ -1,6 +1,6 @@
 const path = require('path');
 require('dotenv').config({
-  path: path.join(__dirname, '.env'),
+  path: path.join(__dirname, '.env')
 });
 
 const express = require('express');
@@ -10,73 +10,54 @@ const fs = require('fs');
 const fsp = fs.promises;
 const os = require('os');
 const axios = require('axios');
-const ffmpegPath = require('ffmpeg-static');
-const { spawn } = require('child_process');
-const sharp = require('sharp');
 
 const {
   createVideoTask,
-  getVideoStatus,
+  getVideoStatus
 } = require('./agnes-video');
 
 const {
   promptRouter,
-  logPromptStartupState,
+  logPromptStartupState
 } = require('./prompt-routes');
 
 const app = express();
-
 const PORT = process.env.PORT || 3000;
 
-const JOB_TIMEOUT_MS =
-  5 * 60 * 1000;
+const JOB_TIMEOUT_MS = 5 * 60 * 1000;
+const AGNES_POLL_INTERVAL_MS = 20 * 1000;
+const AGNES_RATE_LIMIT_BACKOFF_MS = 60 * 1000;
 
-const AGNES_POLL_INTERVAL_MS =
-  20 * 1000;
-
-const AGNES_RATE_LIMIT_BACKOFF_MS =
-  60 * 1000;
-
-const GENERATED_DIR =
-  path.join(os.tmpdir(), 'generated');
-
-const WATERMARK_TEXT = (
-  process.env.CHANNEL_WATERMARK ||
-  'MarbleVortex3D'
-).trim();
-
-const WATERMARK_OPACITY = Math.min(
-  1,
-  Math.max(
-    0.15,
-    Number(
-      process.env.WATERMARK_OPACITY || 0.72
-    )
-  )
+const GENERATED_DIR = path.join(
+  os.tmpdir(),
+  'generated'
 );
 
 fs.mkdirSync(
   GENERATED_DIR,
   {
-    recursive: true,
+    recursive: true
   }
 );
 
-/*
- * Middleware
- */
+/* =========================================================
+   MIDDLEWARE
+========================================================= */
 
-app.use(cors());
+app.use(
+  cors()
+);
 
 app.use(
   express.json({
-    limit: '2mb',
+    limit: '2mb'
   })
 );
 
-/*
- * Serve generated videos.
- */
+/* =========================================================
+   GENERATED VIDEO FILES
+========================================================= */
+
 app.use(
   '/generated',
   express.static(
@@ -94,19 +75,22 @@ app.use(
           'Accept-Ranges',
           'bytes'
         );
-      },
+      }
     }
   )
 );
 
+/* =========================================================
+   JOB STORAGE
+========================================================= */
+
 const jobs = new Map();
 
-/*
- * Map Agnes status to frontend status.
- */
-function mapStatus(
-  agnesStatus
-) {
+/* =========================================================
+   STATUS MAPPING
+========================================================= */
+
+function mapStatus(agnesStatus) {
   switch (agnesStatus) {
     case 'queued':
       return 'pending';
@@ -125,22 +109,23 @@ function mapStatus(
   }
 }
 
+/* =========================================================
+   ABSOLUTE VIDEO URL
+========================================================= */
+
 /*
- * Convert relative generated URL
- * into an absolute backend URL.
- *
- * Example:
- *
- * /generated/abc.mp4
- *
- * becomes:
- *
- * http://localhost:3000/generated/abc.mp4
- *
- * or:
- *
- * https://your-project.vercel.app/generated/abc.mp4
- */
+  Frontend is hosted on Netlify and backend is hosted
+  separately on Vercel.
+
+  Therefore:
+
+  /generated/video.mp4
+
+  needs to become:
+
+  https://backend-domain.vercel.app/generated/video.mp4
+*/
+
 function makeAbsoluteVideoUrl(
   req,
   videoUrl
@@ -149,26 +134,39 @@ function makeAbsoluteVideoUrl(
     return null;
   }
 
+  /*
+    If already an absolute URL,
+    return it directly.
+  */
+
   if (
-    videoUrl.startsWith('http://') ||
-    videoUrl.startsWith('https://')
+    /^https?:\/\//i.test(videoUrl)
   ) {
     return videoUrl;
   }
 
   const protocol =
     req.headers['x-forwarded-proto'] ||
-    req.protocol;
+    (req.secure
+      ? 'https'
+      : 'http');
 
   const host =
+    req.headers['x-forwarded-host'] ||
     req.get('host');
 
-  return `${protocol}://${host}${videoUrl}`;
+  const normalizedPath =
+    videoUrl.startsWith('/')
+      ? videoUrl
+      : `/${videoUrl}`;
+
+  return `${protocol}://${host}${normalizedPath}`;
 }
 
-/*
- * Response sent to frontend.
- */
+/* =========================================================
+   CLIENT RESPONSE
+========================================================= */
+
 function toClientResponse(
   job,
   req
@@ -186,13 +184,14 @@ function toClientResponse(
         job.videoUrl
       ),
 
-    error: job.error,
+    error: job.error
   };
 }
 
-/*
- * Physics-directed prompt.
- */
+/* =========================================================
+   PHYSICS-DIRECTED PROMPT
+========================================================= */
+
 function buildPhysicsDirectedPrompt(
   userPrompt
 ) {
@@ -217,38 +216,10 @@ ${userPrompt.trim()}
 `.trim();
 }
 
-/*
- * Escape text for SVG.
- */
-function escapeXml(
-  value
-) {
-  return String(value)
-    .replace(
-      /&/g,
-      '&amp;'
-    )
-    .replace(
-      /</g,
-      '&lt;'
-    )
-    .replace(
-      />/g,
-      '&gt;'
-    )
-    .replace(
-      /"/g,
-      '&quot;'
-    )
-    .replace(
-      /'/g,
-      '&apos;'
-    );
-}
+/* =========================================================
+   DOWNLOAD VIDEO
+========================================================= */
 
-/*
- * Download Agnes video.
- */
 async function downloadFile(
   url,
   target
@@ -257,27 +228,21 @@ async function downloadFile(
     await axios.get(
       url,
       {
-        responseType:
-          'stream',
+        responseType: 'stream',
 
-        timeout:
-          120000,
+        timeout: 120000,
 
-        maxRedirects:
-          5,
+        maxRedirects: 5,
 
         headers: {
           'User-Agent':
-            'MarbleVortex3D-LocalVideoRenderer/1.0',
-        },
+            'MarbleVortex3D-LocalVideoRenderer/1.0'
+        }
       }
     );
 
   await new Promise(
-    (
-      resolve,
-      reject
-    ) => {
+    (resolve, reject) => {
       const out =
         fs.createWriteStream(
           target
@@ -303,395 +268,55 @@ async function downloadFile(
   );
 
   /*
-   * Verify downloaded source.
-   */
-  if (!fs.existsSync(target)) {
-    throw new Error(
-      'Source video download completed but file was not created.'
-    );
-  }
+    Verify downloaded file.
+  */
 
-  const stats =
+  const stat =
     await fsp.stat(
       target
     );
 
-  if (stats.size === 0) {
+  if (
+    !stat.isFile() ||
+    stat.size <= 0
+  ) {
     throw new Error(
-      'Downloaded source video is empty.'
+      'Downloaded video file is empty.'
     );
   }
 
   console.log(
-    `[download] Source video size: ${stats.size} bytes`
+    `[download] Video saved: ${target}`
   );
-}
-
-/*
- * Create watermark PNG.
- *
- * We do NOT use FFmpeg drawtext.
- *
- * DejaVuSans.ttf is bundled inside:
- *
- * backend/fonts/DejaVuSans.ttf
- */
-async function createWatermarkImage(
-  outputPath
-) {
-  const text =
-    escapeXml(
-      WATERMARK_TEXT
-    );
-
-  const fontPath =
-    path.join(
-      __dirname,
-      'fonts',
-      'DejaVuSans.ttf'
-    );
-
-  if (
-    !fs.existsSync(
-      fontPath
-    )
-  ) {
-    throw new Error(
-      `Watermark font not found: ${fontPath}`
-    );
-  }
-
-  const fontBase64 =
-    fs
-      .readFileSync(
-        fontPath
-      )
-      .toString(
-        'base64'
-      );
-
-  const svg = `
-    <svg
-      width="500"
-      height="70"
-      xmlns="http://www.w3.org/2000/svg"
-    >
-
-      <defs>
-
-        <style>
-
-          @font-face {
-            font-family: 'DejaVuSans';
-
-            src:
-              url(data:font/ttf;base64,${fontBase64});
-          }
-
-          .watermark {
-            font-family: 'DejaVuSans';
-            font-size: 28px;
-            font-weight: normal;
-          }
-
-        </style>
-
-      </defs>
-
-      <!-- Shadow -->
-
-      <text
-        x="10"
-        y="42"
-        class="watermark"
-        fill="black"
-        fill-opacity="0.35"
-        transform="translate(2,2)"
-      >${text}</text>
-
-      <!-- Main watermark -->
-
-      <text
-        x="10"
-        y="42"
-        class="watermark"
-        fill="white"
-        fill-opacity="${WATERMARK_OPACITY}"
-      >${text}</text>
-
-    </svg>
-  `;
-
-  await sharp(
-    Buffer.from(svg)
-  )
-    .png()
-    .toFile(
-      outputPath
-    );
-
-  /*
-   * Verify watermark PNG.
-   */
-  if (
-    !fs.existsSync(
-      outputPath
-    )
-  ) {
-    throw new Error(
-      'Watermark PNG was not created.'
-    );
-  }
-
-  const stats =
-    await fsp.stat(
-      outputPath
-    );
-
-  if (stats.size === 0) {
-    throw new Error(
-      'Watermark PNG is empty.'
-    );
-  }
 
   console.log(
-    `[watermark] PNG created: ${stats.size} bytes`
+    `[download] File size: ${stat.size} bytes`
   );
 }
 
-/*
- * Burn watermark PNG onto video.
- *
- * IMPORTANT:
- * No drawtext.
- *
- * Explicit video/audio mapping is used.
- */
-function burnWatermark(
-  inputPath,
-  outputPath,
-  watermarkPath
-) {
-  return new Promise(
-    (
-      resolve,
-      reject
-    ) => {
-      const filter =
-        '[0:v][1:v]overlay=W-w-32:H-h-28[v]';
-
-      const args = [
-        '-y',
-
-        /*
-         * Source video.
-         */
-        '-i',
-        inputPath,
-
-        /*
-         * Watermark PNG.
-         */
-        '-i',
-        watermarkPath,
-
-        /*
-         * Overlay watermark.
-         */
-        '-filter_complex',
-        filter,
-
-        /*
-         * Explicitly select
-         * watermarked video.
-         */
-        '-map',
-        '[v]',
-
-        /*
-         * Keep original audio
-         * if audio exists.
-         */
-        '-map',
-        '0:a?',
-
-        /*
-         * Video codec.
-         */
-        '-c:v',
-        'libx264',
-
-        '-preset',
-        'medium',
-
-        '-crf',
-        '18',
-
-        /*
-         * Audio codec.
-         */
-        '-c:a',
-        'aac',
-
-        '-b:a',
-        '192k',
-
-        /*
-         * MP4 optimization.
-         */
-        '-movflags',
-        '+faststart',
-
-        outputPath,
-      ];
-
-      console.log(
-        '[ffmpeg] Starting watermark render...'
-      );
-
-      console.log(
-        '[ffmpeg] Input:',
-        inputPath
-      );
-
-      console.log(
-        '[ffmpeg] Watermark:',
-        watermarkPath
-      );
-
-      console.log(
-        '[ffmpeg] Output:',
-        outputPath
-      );
-
-      const child =
-        spawn(
-          ffmpegPath,
-          args,
-          {
-            windowsHide:
-              true,
-          }
-        );
-
-      let stderr = '';
-
-      child.stderr.on(
-        'data',
-        (data) => {
-          const message =
-            data.toString();
-
-          stderr += message;
-
-          console.log(
-            '[ffmpeg]',
-            message
-          );
-        }
-      );
-
-      child.on(
-        'error',
-        (err) => {
-          reject(err);
-        }
-      );
-
-      child.on(
-        'close',
-        (code) => {
-          if (
-            code !== 0
-          ) {
-            reject(
-              new Error(
-                `FFmpeg watermark render failed (exit ${code}). ${stderr.slice(
-                  -2000
-                )}`
-              )
-            );
-
-            return;
-          }
-
-          /*
-           * FFmpeg says success.
-           * Now verify actual MP4.
-           */
-          if (
-            !fs.existsSync(
-              outputPath
-            )
-          ) {
-            reject(
-              new Error(
-                'FFmpeg completed successfully, but output video file was not created.'
-              )
-            );
-
-            return;
-          }
-
-          const stats =
-            fs.statSync(
-              outputPath
-            );
-
-          if (
-            stats.size === 0
-          ) {
-            reject(
-              new Error(
-                'FFmpeg created an empty output video.'
-              )
-            );
-
-            return;
-          }
-
-          console.log(
-            `[ffmpeg] Watermark render completed successfully.`
-          );
-
-          console.log(
-            `[ffmpeg] Output video size: ${stats.size} bytes`
-          );
-
-          resolve();
-        }
-      );
-    }
-  );
-}
+/* =========================================================
+   SAVE VIDEO WITHOUT WATERMARK
+========================================================= */
 
 /*
- * Full watermark rendering pipeline.
- */
-async function renderWatermarkedVideo(
+  IMPORTANT:
+
+  There is NO:
+  - Sharp
+  - FFmpeg
+  - watermark PNG
+  - overlay
+  - drawtext
+  - font
+  - watermark rendering
+
+  Agnes video is simply downloaded and served.
+*/
+
+async function saveGeneratedVideo(
   sourceUrl,
   jobId
 ) {
-  const workDir =
-    await fsp.mkdtemp(
-      path.join(
-        os.tmpdir(),
-        'marblevortex3d-'
-      )
-    );
-
-  const inputPath =
-    path.join(
-      workDir,
-      'source.mp4'
-    );
-
-  const watermarkPath =
-    path.join(
-      workDir,
-      'watermark.png'
-    );
-
   const outputName =
     `${jobId}.mp4`;
 
@@ -701,127 +326,96 @@ async function renderWatermarkedVideo(
       outputName
     );
 
-  try {
-    console.log(
-      `[render] Downloading source video for ${jobId}...`
+  await downloadFile(
+    sourceUrl,
+    outputPath
+  );
+
+  /*
+    Verify final video exists.
+  */
+
+  const stat =
+    await fsp.stat(
+      outputPath
     );
 
-    await downloadFile(
-      sourceUrl,
-      inputPath
-    );
-
-    console.log(
-      `[render] Creating watermark PNG for ${jobId}...`
-    );
-
-    await createWatermarkImage(
-      watermarkPath
-    );
-
-    console.log(
-      `[render] Applying watermark overlay for ${jobId}...`
-    );
-
-    await burnWatermark(
-      inputPath,
-      outputPath,
-      watermarkPath
-    );
-
-    /*
-     * Final verification.
-     */
-    if (
-      !fs.existsSync(
-        outputPath
-      )
-    ) {
-      throw new Error(
-        'Final watermarked video was not created.'
-      );
-    }
-
-    const outputStats =
-      await fsp.stat(
-        outputPath
-      );
-
-    if (
-      outputStats.size === 0
-    ) {
-      throw new Error(
-        'Final watermarked video is empty.'
-      );
-    }
-
-    console.log(
-      `[render] Final video created: ${outputPath}`
-    );
-
-    console.log(
-      `[render] Final video size: ${outputStats.size} bytes`
-    );
-
-    /*
-     * Return relative path internally.
-     * It will be converted to absolute URL
-     * before sending to frontend.
-     */
-    return `/generated/${outputName}`;
-  } finally {
-    await fsp.rm(
-      workDir,
-      {
-        recursive:
-          true,
-
-        force:
-          true,
-      }
-    ).catch(
-      () => {}
+  if (
+    !stat.isFile() ||
+    stat.size <= 0
+  ) {
+    throw new Error(
+      'Final generated video is empty or invalid.'
     );
   }
+
+  return {
+    outputPath,
+
+    videoUrl:
+      `/generated/${outputName}`
+  };
 }
 
-/*
- * Generate video.
- */
+/* =========================================================
+   GENERATE VIDEO
+========================================================= */
+
 app.post(
   '/api/generate',
-  async (
-    req,
-    res
-  ) => {
+  async (req, res) => {
     const prompt =
       typeof req.body?.prompt === 'string'
         ? req.body.prompt.trim()
         : '';
 
     if (!prompt) {
-      return res.status(400).json({
-        error:
-          'Prompt cannot be empty.',
-      });
+      return res
+        .status(400)
+        .json({
+          error:
+            'Prompt cannot be empty.'
+        });
     }
 
-    if (
-      !process.env.AGNES_API_KEY
-    ) {
-      return res.status(500).json({
-        error:
-          'Server is missing AGNES_API_KEY. Add it to backend/.env and restart.',
-      });
+    if (!process.env.AGNES_API_KEY) {
+      return res
+        .status(500)
+        .json({
+          error:
+            'Server is missing AGNES_API_KEY. Add it to backend/.env and restart.'
+        });
     }
 
     try {
+      console.log(
+        '========================================'
+      );
+
+      console.log(
+        '[generate] Starting video generation'
+      );
+
+      console.log(
+        '[generate] Prompt:',
+        prompt
+      );
+
       const task =
         await createVideoTask(
           buildPhysicsDirectedPrompt(
             prompt
           )
         );
+
+      console.log(
+        '[generate] Agnes task:',
+        JSON.stringify(
+          task,
+          null,
+          2
+        )
+      );
 
       const jobId =
         crypto.randomUUID();
@@ -863,100 +457,92 @@ app.post(
             now,
 
           nextAgnesCheckAt:
-            now,
+            now
         }
       );
 
-      return res.status(201).json({
-        jobId,
+      console.log(
+        '[generate] Job ID:',
+        jobId
+      );
 
-        status:
-          mapStatus(
-            task.status
-          ),
-      });
+      console.log(
+        '[generate] Status:',
+        mapStatus(
+          task.status
+        )
+      );
+
+      console.log(
+        '========================================'
+      );
+
+      return res
+        .status(201)
+        .json({
+          jobId,
+
+          status:
+            mapStatus(
+              task.status
+            )
+        });
     } catch (err) {
       console.error(
         '[generate] Agnes AI error:',
-        err.message
+        err
       );
 
       const status =
         err.status === 429
           ? 429
           : err.status &&
-            err.status < 500
+              err.status < 500
             ? err.status
             : 502;
 
-      return res.status(
-        status
-      ).json({
-        error:
-          err.message,
+      return res
+        .status(status)
+        .json({
+          error:
+            err.message,
 
-        retryAfter:
-          err.retryAfter,
-      });
+          retryAfter:
+            err.retryAfter
+        });
     }
   }
 );
 
-/*
- * Check video status.
- */
+/* =========================================================
+   VIDEO STATUS
+========================================================= */
+
 app.get(
   '/api/status/:jobId',
-  async (
-    req,
-    res
-  ) => {
+  async (req, res) => {
     const job =
       jobs.get(
         req.params.jobId
       );
 
     if (!job) {
-      return res.status(404).json({
-        error:
-          'Unknown job ID. It may have expired — try generating again.',
-      });
+      return res
+        .status(404)
+        .json({
+          error:
+            'Unknown job ID. It may have expired — try generating again.'
+        });
     }
 
     /*
-     * Only report completed if
-     * a final video URL exists.
-     */
-    if (
-      job.status === 'completed'
-    ) {
-      if (
-        job.videoUrl
-      ) {
-        return res.json(
-          toClientResponse(
-            job,
-            req
-          )
-        );
-      }
-
-      job.status =
-        'failed';
-
-      job.error =
-        'Video generation completed, but the final video URL was not created.';
-
-      return res.json(
-        toClientResponse(
-          job,
-          req
-        )
-      );
-    }
+      Already completed.
+    */
 
     if (
-      job.status === 'failed'
+      job.status ===
+        'completed' &&
+      job.videoUrl
     ) {
       return res.json(
         toClientResponse(
@@ -967,8 +553,29 @@ app.get(
     }
 
     /*
-     * Overall timeout.
-     */
+      Already failed.
+    */
+
+    if (
+      job.status ===
+      'failed'
+    ) {
+      return res.json(
+        toClientResponse(
+          job,
+          req
+        )
+      );
+    }
+
+    /*
+      Timeout protection.
+
+      Keeping the original 5-minute timeout
+      because this code was previously generating
+      correctly.
+    */
+
     if (
       Date.now() -
         job.createdAt >
@@ -980,6 +587,10 @@ app.get(
       job.error =
         'Video generation timed out after 5 minutes.';
 
+      console.error(
+        `[status] Timeout: ${job.jobId}`
+      );
+
       return res.json(
         toClientResponse(
           job,
@@ -989,8 +600,9 @@ app.get(
     }
 
     /*
-     * Respect polling interval.
-     */
+      Do not call Agnes before next check time.
+    */
+
     if (
       Date.now() <
       job.nextAgnesCheckAt
@@ -1010,92 +622,110 @@ app.get(
             job.agnesVideoId,
 
           taskId:
-            job.agnesTaskId,
+            job.agnesTaskId
         });
+
+      console.log(
+        `[status] ${job.jobId}:`,
+        JSON.stringify(
+          result,
+          null,
+          2
+        )
+      );
+
+      /*
+        Schedule next Agnes check.
+      */
 
       job.nextAgnesCheckAt =
         Date.now() +
         AGNES_POLL_INTERVAL_MS;
 
+      /*
+        Update status.
+      */
+
+      job.status =
+        mapStatus(
+          result.status
+        );
+
       job.progress =
         result.progress;
 
       /*
-       * Agnes completed.
-       */
+        =====================================================
+        VIDEO COMPLETED
+        =====================================================
+      */
+
       if (
-        result.status === 'completed'
+        job.status ===
+          'completed' &&
+        result.videoUrl
       ) {
-        /*
-         * Agnes must provide
-         * a source video URL.
-         */
-        if (
-          !result.videoUrl
-        ) {
-          job.status =
-            'failed';
-
-          job.error =
-            'Agnes reported the video as completed, but no source video URL was returned.';
-
-          return res.json(
-            toClientResponse(
-              job,
-              req
-            )
-          );
-        }
-
-        job.status =
-          'processing';
-
         job.progress =
           95;
 
         job.sourceVideoUrl =
           result.videoUrl;
 
-        try {
-          console.log(
-            `[render] Burning ${WATERMARK_TEXT} watermark into ${job.jobId}...`
-          );
+        console.log(
+          `[video] Agnes completed: ${result.videoUrl}`
+        );
 
-          job.videoUrl =
-            await renderWatermarkedVideo(
+        try {
+          /*
+            IMPORTANT:
+
+            Direct download only.
+
+            NO WATERMARK.
+            NO FFMPEG.
+            NO SHARP.
+          */
+
+          const saved =
+            await saveGeneratedVideo(
               result.videoUrl,
               job.jobId
             );
 
           /*
-           * Only NOW mark completed.
-           */
-          job.progress =
-            100;
+            Store local generated URL.
+          */
+
+          job.videoUrl =
+            saved.videoUrl;
+
+          /*
+            Only NOW mark completed.
+          */
 
           job.status =
             'completed';
 
-          console.log(
-            `[render] Job ${job.jobId} completed successfully.`
-          );
+          job.progress =
+            100;
+
+          job.error =
+            null;
 
           console.log(
-            `[render] Video URL: ${job.videoUrl}`
+            `[video] Final video ready: ${job.videoUrl}`
           );
-        } catch (
-          renderErr
-        ) {
+        } catch (downloadErr) {
           console.error(
-            '[render] Watermark error:',
-            renderErr.message
+            '[video] Download error:',
+            downloadErr
           );
 
           job.status =
             'failed';
 
           job.error =
-            `Video was generated, but the final watermark render failed: ${renderErr.message}`;
+            `Video was generated, but downloading the final video failed: ${downloadErr.message}`;
 
           return res.json(
             toClientResponse(
@@ -1104,25 +734,18 @@ app.get(
             )
           );
         }
-      } else {
-        /*
-         * Agnes still processing.
-         */
-        job.status =
-          mapStatus(
-            result.status
-          );
       }
 
       /*
-       * Agnes itself failed.
-       */
-      if (
-        result.status === 'failed'
-      ) {
-        job.status =
-          'failed';
+        =====================================================
+        AGNES FAILED
+        =====================================================
+      */
 
+      if (
+        job.status ===
+        'failed'
+      ) {
         job.error =
           (
             result.error &&
@@ -1142,13 +765,16 @@ app.get(
           req
         )
       );
-    } catch (
-      err
-    ) {
+    } catch (err) {
       console.error(
         '[status] Agnes AI error:',
-        err.message
+        err
       );
+
+      /*
+        Authentication / invalid task errors
+        should fail immediately.
+      */
 
       if (
         err.status === 404 ||
@@ -1169,11 +795,18 @@ app.get(
         );
       }
 
+      /*
+        Rate limit / temporary error.
+
+        Keep job alive.
+      */
+
       const backoffMs =
         err.status === 429
           ? Math.max(
               (err.retryAfter || 0) *
                 1000,
+
               AGNES_RATE_LIMIT_BACKOFF_MS
             )
           : AGNES_POLL_INTERVAL_MS;
@@ -1192,53 +825,76 @@ app.get(
   }
 );
 
-/*
- * Backend configuration.
- */
+/* =========================================================
+   CONFIG
+========================================================= */
+
 app.get(
   '/api/config',
-  (
-    _req,
-    res
-  ) => {
+  (_req, res) => {
     res.json({
       watermark:
-        WATERMARK_TEXT,
+        null,
 
       physicsDirected:
         true,
 
       finalVideoHasBurnedWatermark:
-        true,
+        false
     });
   }
 );
 
-/*
- * Prompt API.
- */
+/* =========================================================
+   HEALTH CHECK
+========================================================= */
+
+app.get(
+  '/api/health',
+  (_req, res) => {
+    res.json({
+      ok: true,
+
+      service:
+        'ai-blender-video-maker',
+
+      watermark:
+        false,
+
+      timestamp:
+        new Date().toISOString()
+    });
+  }
+);
+
+/* =========================================================
+   PROMPT ROUTER
+========================================================= */
+
 app.use(
   '/api/prompt',
   promptRouter
 );
 
-/*
- * 404 handler.
- */
+/* =========================================================
+   404
+========================================================= */
+
 app.use(
-  (
-    req,
+  (req, res) => {
     res
-  ) =>
-    res.status(404).json({
-      error:
-        'Not found.',
-    })
+      .status(404)
+      .json({
+        error:
+          'Not found.'
+      });
+  }
 );
 
-/*
- * Start server.
- */
+/* =========================================================
+   START SERVER
+========================================================= */
+
 app.listen(
   PORT,
   () => {
@@ -1251,11 +907,11 @@ app.listen(
     );
 
     console.log(
-      `🔖 Burned-in watermark: ${WATERMARK_TEXT}`
+      `🔖 Watermark: DISABLED`
     );
 
     console.log(
-      `🎨 Watermark font: DejaVuSans.ttf`
+      `📁 Generated videos: ${GENERATED_DIR}`
     );
 
     if (
