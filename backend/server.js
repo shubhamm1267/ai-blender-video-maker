@@ -167,22 +167,37 @@ async function downloadFile(url, target) {
 async function createWatermarkImage(outputPath) {
   const text = escapeXml(WATERMARK_TEXT);
 
+  const fontPath = path.join(
+    __dirname,
+    'fonts',
+    'DejaVuSans.ttf'
+  );
+
+  const fontBase64 = fs
+    .readFileSync(fontPath)
+    .toString('base64');
+
   const svg = `
     <svg
       width="500"
       height="70"
       xmlns="http://www.w3.org/2000/svg"
     >
+      <defs>
+        <style>
+          @font-face {
+            font-family: 'DejaVuSans';
+            src: url(data:font/ttf;base64,${fontBase64});
+          }
 
-      <style>
-        .watermark {
-          font-family: Arial, sans-serif;
-          font-size: 28px;
-          font-weight: 600;
-        }
-      </style>
+          .watermark {
+            font-family: 'DejaVuSans';
+            font-size: 28px;
+            font-weight: normal;
+          }
+        </style>
+      </defs>
 
-      <!-- Shadow -->
       <text
         x="10"
         y="42"
@@ -192,7 +207,6 @@ async function createWatermarkImage(outputPath) {
         transform="translate(2,2)"
       >${text}</text>
 
-      <!-- Main watermark -->
       <text
         x="10"
         y="42"
@@ -200,7 +214,6 @@ async function createWatermarkImage(outputPath) {
         fill="white"
         fill-opacity="${WATERMARK_OPACITY}"
       >${text}</text>
-
     </svg>
   `;
 
