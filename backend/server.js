@@ -197,7 +197,7 @@ function buildPhysicsDirectedPrompt(
 ) {
   return `
 PHYSICS-DIRECTED VIDEO SPECIFICATION:
-Create the scene as one continuous, physically coherent 5-second shot. Treat
+Create the scene as one continuous, physically coherent 12-second shot. Treat
 gravity, mass, inertia, friction, collision response, contact forces and
 momentum as real constraints. Every moving object must remain supported by
 visible geometry or a continuous fluid/particle path. No floating, teleporting,
