@@ -1,0 +1,67 @@
+<div class="page">
+  <div class="card">
+    <h1>Prompt Ideas</h1>
+    <p class="subtitle">
+      Get a fresh "oddly satisfying" 3D animation prompt — a new mechanism, material and
+      palette every time.
+    </p>
+
+    <div class="output" [class.is-empty]="!prompt && !isLoading && !errorMessage">
+      <div class="spinner-wrap" *ngIf="isLoading">
+        <span class="spinner" aria-hidden="true"></span>
+        <p>Thinking up a new idea…</p>
+      </div>
+
+      <ng-container *ngIf="!isLoading">
+        <div *ngIf="errorMessage">
+          <p class="error">{{ errorMessage }}</p>
+          <p class="error-hint" *ngIf="errorHint">{{ errorHint }}</p>
+        </div>
+
+        <pre class="prompt-text" *ngIf="!errorMessage && prompt">{{ prompt }}</pre>
+
+        <p class="empty" *ngIf="!errorMessage && !prompt">
+          Hit "Generate idea" — your first prompt shows up here.
+        </p>
+      </ng-container>
+    </div>
+
+    <label class="loop-toggle">
+      <span>
+        Seamless loop
+        <small>{{ loopEnabled ? 'Last frame matches the first' : 'One-off 5-second clip' }}</small>
+      </span>
+      <button
+        type="button"
+        class="switch"
+        role="switch"
+        [attr.aria-checked]="loopEnabled"
+        [class.on]="loopEnabled"
+        (click)="toggleLoop()"
+      >
+        <span class="knob"></span>
+      </button>
+    </label>
+
+    <div class="actions">
+      <button class="generate-btn" (click)="onGenerate()" [disabled]="isLoading">
+        <span *ngIf="!isLoading">Generate idea</span>
+        <span *ngIf="isLoading">Generating…</span>
+      </button>
+
+      <div class="secondary-actions">
+        <button class="ghost-btn" (click)="onCopy()" [disabled]="!prompt">
+          {{ copied ? 'Copied' : 'Copy prompt' }}
+        </button>
+        <button class="ghost-btn accent" (click)="onUseForVideo()" [disabled]="!prompt">
+          Use for video →
+        </button>
+      </div>
+    </div>
+
+    <p class="foot" *ngIf="history.length">
+      {{ history.length }} idea{{ history.length === 1 ? '' : 's' }} this session — the last
+      {{ history.length }} are sent back to the model so it doesn't repeat itself.
+    </p>
+  </div>
+</div>

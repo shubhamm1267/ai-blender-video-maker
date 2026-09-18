@@ -1,0 +1,19 @@
+{
+  "name": "text-to-video-app",
+  "version": "1.1.0",
+  "private": true,
+  "description": "Full-stack app: Text-to-Video generation (Agnes AI) + Prompt Ideas (Gemini).",
+  "scripts": {
+    "install:backend": "npm install --prefix backend",
+    "install:frontend": "npm install --prefix frontend",
+    "install:all": "npm install && npm run install:backend && npm run install:frontend",
+    "start:backend": "npm start --prefix backend",
+    "start:frontend": "npm start --prefix frontend",
+    "start": "npm run dev",
+    "dev": "concurrently -k -n BACKEND,FRONTEND -c blue,green \"npm:start:backend\" \"npm:start:frontend\"",
+    "check-key": "npm run check-key --prefix backend"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}

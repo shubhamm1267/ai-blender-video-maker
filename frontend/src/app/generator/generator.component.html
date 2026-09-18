@@ -1,0 +1,42 @@
+<div class="page">
+  <div class="card">
+    <h1>Text → Video</h1>
+    <p class="subtitle">Physics-directed AI video generation with a permanent MarbleVortex3D watermark.</p>
+    <div class="quality-note">
+      <strong>Physics mode ON</strong>
+      <span>Gravity • friction • collisions • momentum • contact continuity • temporal consistency</span>
+    </div>
+
+    <textarea
+      [(ngModel)]="prompt"
+      [disabled]="isGenerating"
+      placeholder="A cinematic shot of a cat walking on the beach at sunset, soft ocean waves, warm golden lighting, realistic motion..."
+      rows="5"
+    ></textarea>
+
+    <p class="handoff" *ngIf="fromPromptPage">
+      Prompt loaded from the Prompt Ideas page — edit it if you like, then generate.
+    </p>
+
+    <div class="actions">
+      <button class="generate-btn" (click)="onGenerate()" [disabled]="isGenerating">
+        <span *ngIf="!isGenerating">Generate Video</span>
+        <span *ngIf="isGenerating">Generating…</span>
+      </button>
+    </div>
+
+    <p class="warning" *ngIf="warningMessage">{{ warningMessage }}</p>
+    <p class="error" *ngIf="errorMessage">{{ errorMessage }}</p>
+
+    <div class="status-row" *ngIf="status !== 'idle'">
+      <span class="status-badge" [class]="status">{{ statusLabel }}</span>
+      <span class="progress" *ngIf="isGenerating && progress">{{ progress }}%</span>
+    </div>
+
+    <div class="video-wrap" *ngIf="videoUrl">
+      <video [src]="videoUrl" controls autoplay muted loop playsinline></video>
+      <div class="watermark-note">✓ Final MP4 includes a burned-in <b>MarbleVortex3D</b> watermark</div>
+      <button class="download-btn" (click)="onDownload()">Download Final Video</button>
+    </div>
+  </div>
+</div>
