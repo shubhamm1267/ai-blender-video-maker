@@ -65,7 +65,7 @@ export class GenerationService {
       return err.error.error;
     }
     if (err.status === 0) {
-      return 'Cannot reach the backend. Is it running on http://localhost:3000?';
+      return 'Cannot reach the backend. Is it running on https://ai-blender-video-maker.vercel.app?';
     }
     return `Request failed (HTTP ${err.status}).`;
   }

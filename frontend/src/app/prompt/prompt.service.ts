@@ -41,7 +41,7 @@ export class PromptService {
   private describe(err: HttpErrorResponse): PromptFailure {
     if (err.status === 0) {
       return {
-        message: 'Cannot reach the backend (http://localhost:3000).',
+        message: 'Cannot reach the backend (https://ai-blender-video-maker.vercel.app).',
         hint: 'Is the backend window still running? start.bat runs both servers together.',
       };
     }

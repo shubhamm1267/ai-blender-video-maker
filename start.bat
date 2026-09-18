@@ -75,7 +75,7 @@ if not errorlevel 1 (
 
 echo [4/4] Starting both servers...
 echo.
-echo       Backend        http://localhost:3000
+echo       Backend        https://ai-blender-video-maker.vercel.app
 echo       Text to Video  http://localhost:4200/#/video
 echo       Prompt Ideas   http://localhost:4200/#/prompt
 echo.
