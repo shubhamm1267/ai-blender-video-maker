@@ -1,322 +1,263 @@
+require('dotenv').config();
+
 const axios = require('axios');
 
-const AGNES_ROOT = 'https://apihub.agnes-ai.com';
-const AGNES_V1 = `${AGNES_ROOT}/v1`;
-const AGNES_STATUS_URL = `${AGNES_ROOT}/agnesapi`;
+const AGNES_API_KEY = process.env.AGNES_API_KEY;
 
-// Agnes Video v2.0
-const MODEL = 'agnes-video-v2.0';
+const AGNES_BASE_URL = 'https://apihub.agnes-ai.com';
+const MODEL_NAME = 'agnes-video-v2.0';
 
-const REQUEST_TIMEOUT_MS = 30000;
-
-// ============================================================
-// VIDEO SETTINGS
-// ============================================================
-
-const VIDEO_WIDTH = 1152;
-const VIDEO_HEIGHT = 768;
+const WIDTH = 1152;
+const HEIGHT = 768;
 
 // 289 / 24 = 12.04 seconds
-const VIDEO_FRAMES = 289;
-const VIDEO_FPS = 24;
+const NUM_FRAMES = 289;
+const FRAME_RATE = 24;
 
-// ============================================================
-// AUTH
-// ============================================================
-
-function authHeaders() {
-  return {
-    Authorization: `Bearer ${process.env.AGNES_API_KEY}`,
-    'Content-Type': 'application/json',
-  };
+if (!AGNES_API_KEY) {
+  console.warn('[Agnes] AGNES_API_KEY is not available.');
 }
 
-// ============================================================
-// FIND VIDEO URL
-// ============================================================
-
 function extractVideoUrl(data) {
-  if (!data) {
+  if (!data || typeof data !== 'object') {
     return null;
   }
 
-  // ----------------------------------------------------------
-  // Direct top-level fields
-  // ----------------------------------------------------------
-
-  const directCandidates = [
-    data.video_url,
+  const candidates = [
     data.url,
+    data.video_url,
     data.videoUrl,
     data.output_url,
     data.outputUrl,
     data.download_url,
     data.downloadUrl,
     data.remixed_from_video_id,
+
+    data.data?.url,
+    data.data?.video_url,
+    data.data?.videoUrl,
+    data.data?.output_url,
+    data.data?.outputUrl,
+    data.data?.download_url,
+    data.data?.downloadUrl,
+    data.data?.remixed_from_video_id,
+
+    data.result?.url,
+    data.result?.video_url,
+    data.result?.videoUrl,
+    data.result?.output_url,
+    data.result?.outputUrl,
+    data.result?.download_url,
+    data.result?.downloadUrl,
+    data.result?.remixed_from_video_id,
+
+    data.output?.url,
+    data.output?.video_url,
+    data.output?.videoUrl,
+
+    data.video?.url,
+    data.video?.video_url,
+    data.video?.videoUrl,
   ];
 
-  for (const value of directCandidates) {
-    if (
-      typeof value === 'string' &&
-      /^https?:\/\//i.test(value)
-    ) {
-      return value;
+  for (const value of candidates) {
+    if (typeof value === 'string' && value.trim()) {
+      return value.trim();
     }
   }
 
-  // ----------------------------------------------------------
-  // Common nested response fields
-  // ----------------------------------------------------------
-
-  const nestedObjects = [
-    data.data,
-    data.result,
-    data.output,
-    data.video,
-  ];
-
-  for (const obj of nestedObjects) {
-    if (!obj || typeof obj !== 'object') {
-      continue;
-    }
-
-    const nestedCandidates = [
-      obj.video_url,
-      obj.url,
-      obj.videoUrl,
-      obj.output_url,
-      obj.outputUrl,
-      obj.download_url,
-      obj.downloadUrl,
-      obj.remixed_from_video_id,
-    ];
-
-    for (const value of nestedCandidates) {
-      if (
-        typeof value === 'string' &&
-        /^https?:\/\//i.test(value)
-      ) {
-        return value;
-      }
-    }
-  }
-
-  // ----------------------------------------------------------
-  // Recursive fallback
-  // ----------------------------------------------------------
-
-  const visited = new Set();
-
-  function searchObject(obj) {
-    if (!obj || typeof obj !== 'object') {
-      return null;
-    }
-
-    if (visited.has(obj)) {
-      return null;
-    }
-
-    visited.add(obj);
-
-    for (const [key, value] of Object.entries(obj)) {
-      if (
-        typeof value === 'string' &&
-        /^https?:\/\//i.test(value) &&
-        (
-          /video/i.test(key) ||
-          /url/i.test(key) ||
-          /output/i.test(key) ||
-          /download/i.test(key)
-        )
-      ) {
-        return value;
-      }
-
-      if (
-        value &&
-        typeof value === 'object'
-      ) {
-        const found = searchObject(value);
-
-        if (found) {
-          return found;
-        }
-      }
-    }
-
-    return null;
-  }
-
-  return searchObject(data);
+  return null;
 }
-
-// ============================================================
-// CREATE VIDEO TASK
-// ============================================================
 
 async function createVideoTask(prompt) {
+  if (!AGNES_API_KEY) {
+    throw new Error(
+      'AGNES_API_KEY is missing. Add AGNES_API_KEY to your environment variables.'
+    );
+  }
+
+  if (!prompt || !String(prompt).trim()) {
+    throw new Error('Prompt is required.');
+  }
+
+  const payload = {
+    model: MODEL_NAME,
+    prompt: String(prompt).trim(),
+
+    width: WIDTH,
+    height: HEIGHT,
+
+    // ~12 seconds at 24 FPS
+    num_frames: NUM_FRAMES,
+    frame_rate: FRAME_RATE,
+  };
+
+  console.log('==========================================');
+  console.log('[Agnes] Creating video');
+  console.log('[Agnes] Model:', MODEL_NAME);
+  console.log('[Agnes] Resolution:', `${WIDTH}x${HEIGHT}`);
+  console.log('[Agnes] Frames:', NUM_FRAMES);
+  console.log('[Agnes] FPS:', FRAME_RATE);
+  console.log(
+    '[Agnes] Duration:',
+    `${(NUM_FRAMES / FRAME_RATE).toFixed(2)} seconds`
+  );
+  console.log('==========================================');
+
   try {
-    const requestBody = {
-      model: MODEL,
-      prompt: prompt,
-
-      width: VIDEO_WIDTH,
-      height: VIDEO_HEIGHT,
-
-      // Approximately 12 seconds
-      num_frames: VIDEO_FRAMES,
-
-      // Normal 24 FPS
-      frame_rate: VIDEO_FPS,
-    };
-
-    console.log('========================================');
-    console.log('Agnes Video Request');
-    console.log('========================================');
-    console.log('Model:', MODEL);
-    console.log(
-      'Resolution:',
-      `${VIDEO_WIDTH}x${VIDEO_HEIGHT}`
-    );
-    console.log('Frames:', VIDEO_FRAMES);
-    console.log('FPS:', VIDEO_FPS);
-    console.log(
-      'Expected duration:',
-      `${(
-        VIDEO_FRAMES / VIDEO_FPS
-      ).toFixed(2)} seconds`
-    );
-    console.log('========================================');
-
-    const { data } = await axios.post(
-      `${AGNES_V1}/videos`,
-      requestBody,
+    const response = await axios.post(
+      `${AGNES_BASE_URL}/v1/videos`,
+      payload,
       {
-        headers: authHeaders(),
-        timeout: REQUEST_TIMEOUT_MS,
+        headers: {
+          Authorization: `Bearer ${AGNES_API_KEY}`,
+          'Content-Type': 'application/json',
+        },
+        timeout: 60000,
       }
     );
 
-    console.log(
-      'Agnes create response:',
-      JSON.stringify(
-        data,
-        null,
-        2
-      )
-    );
+    const data = response.data;
+
+    console.log('[Agnes] Create response:');
+    console.log(JSON.stringify(data, null, 2));
+
+    const videoId =
+      data?.video_id ||
+      data?.videoId ||
+      data?.data?.video_id ||
+      data?.data?.videoId ||
+      data?.result?.video_id ||
+      data?.result?.videoId;
+
+    const taskId =
+      data?.task_id ||
+      data?.taskId ||
+      data?.id ||
+      data?.data?.task_id ||
+      data?.data?.taskId ||
+      data?.result?.task_id;
+
+    if (!videoId) {
+      throw new Error(
+        'Agnes did not return a video_id.'
+      );
+    }
 
     return {
-      taskId:
-        data.task_id ||
-        data.id ||
-        null,
-
-      videoId:
-        data.video_id ||
-        null,
-
+      videoId,
+      taskId: taskId || null,
       status:
-        data.status ||
-        'queued',
-
+        data?.status ||
+        data?.data?.status ||
+        'in_progress',
       progress:
-        typeof data.progress === 'number'
-          ? data.progress
-          : 0,
+        Number(
+          data?.progress ??
+          data?.data?.progress ??
+          data?.result?.progress ??
+          0
+        ) || 0,
+      videoUrl: extractVideoUrl(data),
+      raw: data,
     };
-  } catch (err) {
-    throw toAgnesError(err);
+  } catch (error) {
+    console.error('[Agnes] Create request failed.');
+
+    if (error.response) {
+      console.error(
+        '[Agnes] HTTP:',
+        error.response.status
+      );
+
+      console.error(
+        '[Agnes] Response:',
+        JSON.stringify(
+          error.response.data,
+          null,
+          2
+        )
+      );
+
+      switch (error.response.status) {
+        case 400:
+          throw new Error(
+            'Agnes rejected the request (400). Check prompt and video parameters.'
+          );
+
+        case 401:
+          throw new Error(
+            'Agnes authentication failed (401).'
+          );
+
+        case 403:
+          throw new Error(
+            'Agnes access denied (403).'
+          );
+
+        case 404:
+          throw new Error(
+            'Agnes API endpoint not found (404).'
+          );
+
+        case 429:
+          throw new Error(
+            'Agnes rate limit reached (429).'
+          );
+
+        case 500:
+          throw new Error(
+            'Agnes server error (500).'
+          );
+
+        case 503:
+          throw new Error(
+            'Agnes service unavailable (503).'
+          );
+
+        default:
+          throw new Error(
+            `Agnes API error (${error.response.status}).`
+          );
+      }
+    }
+
+    throw new Error(
+      error.message || 'Failed to create Agnes video.'
+    );
   }
 }
 
-// ============================================================
-// GET VIDEO STATUS
-// ============================================================
+async function getVideoStatus(videoId) {
+  if (!videoId) {
+    throw new Error('Agnes video_id is missing.');
+  }
 
-async function getVideoStatus({
-  videoId,
-  taskId,
-}) {
+  if (!AGNES_API_KEY) {
+    throw new Error(
+      'AGNES_API_KEY is missing.'
+    );
+  }
+
+  const url =
+    `${AGNES_BASE_URL}/agnesapi` +
+    `?video_id=${encodeURIComponent(videoId)}` +
+    `&model_name=${encodeURIComponent(MODEL_NAME)}`;
+
   try {
-    let data;
+    const response = await axios.get(url, {
+      headers: {
+        Authorization: `Bearer ${AGNES_API_KEY}`,
+      },
+      timeout: 30000,
+    });
 
-    // --------------------------------------------------------
-    // PRIMARY: Poll using video_id
-    // --------------------------------------------------------
+    const data = response.data;
 
-    if (videoId) {
-      const res = await axios.get(
-        AGNES_STATUS_URL,
-        {
-          params: {
-            video_id: videoId,
-            model_name: MODEL,
-          },
-
-          headers: {
-            Authorization:
-              `Bearer ${process.env.AGNES_API_KEY}`,
-          },
-
-          timeout:
-            REQUEST_TIMEOUT_MS,
-        }
-      );
-
-      data = res.data;
-    }
-
-    // --------------------------------------------------------
-    // FALLBACK: Poll using task_id
-    // --------------------------------------------------------
-
-    else if (taskId) {
-      const res = await axios.get(
-        `${AGNES_V1}/videos/${taskId}`,
-        {
-          headers: {
-            Authorization:
-              `Bearer ${process.env.AGNES_API_KEY}`,
-          },
-
-          timeout:
-            REQUEST_TIMEOUT_MS,
-        }
-      );
-
-      data = res.data;
-    }
-
-    else {
-      throw new Error(
-        'No video ID or task ID available to poll.'
-      );
-    }
-
-    // --------------------------------------------------------
-    // RAW RESPONSE LOG
-    // --------------------------------------------------------
-
-    console.log(
-      '========================================'
-    );
-
-    console.log(
-      'Agnes status RAW response:'
-    );
-
-    console.log(
-      JSON.stringify(
-        data,
-        null,
-        2
-      )
-    );
-
-    console.log(
-      '========================================'
-    );
+    console.log('==========================================');
+    console.log('[Agnes] Status RAW response:');
+    console.log(JSON.stringify(data, null, 2));
+    console.log('==========================================');
 
     const status =
       data?.status ||
@@ -324,188 +265,61 @@ async function getVideoStatus({
       data?.result?.status ||
       'in_progress';
 
-    // --------------------------------------------------------
-    // VIDEO URL
-    // --------------------------------------------------------
+    const progress =
+      Number(
+        data?.progress ??
+        data?.data?.progress ??
+        data?.result?.progress ??
+        0
+      ) || 0;
 
-    let videoUrl = null;
+    const videoUrl = extractVideoUrl(data);
 
-    if (
-      status === 'completed'
-    ) {
-      videoUrl =
-        extractVideoUrl(data);
-
-      console.log(
-        '[Agnes] Extracted video URL:',
-        videoUrl
-      );
-
-      if (!videoUrl) {
-        console.error(
-          '[Agnes] WARNING: Video completed but no video URL was found.'
-        );
-      }
-    }
-
-    // --------------------------------------------------------
-    // PROGRESS
-    // --------------------------------------------------------
-
-    let progress = 0;
-
-    if (
-      status === 'completed'
-    ) {
-      progress = 100;
-    } else if (
-      typeof data?.progress === 'number'
-    ) {
-      progress = data.progress;
-    } else if (
-      typeof data?.data?.progress === 'number'
-    ) {
-      progress =
-        data.data.progress;
-    } else if (
-      typeof data?.result?.progress === 'number'
-    ) {
-      progress =
-        data.result.progress;
-    }
-
-    // --------------------------------------------------------
-    // ERROR
-    // --------------------------------------------------------
-
-    const error =
-      data?.error ||
-      data?.data?.error ||
-      data?.result?.error ||
-      null;
+    console.log('[Agnes] Parsed status:', status);
+    console.log('[Agnes] Parsed progress:', progress);
+    console.log('[Agnes] Parsed videoUrl:', videoUrl);
 
     return {
       status,
       progress,
       videoUrl,
-      error,
+      error:
+        data?.error ||
+        data?.data?.error ||
+        data?.result?.error ||
+        null,
       raw: data,
     };
+  } catch (error) {
+    console.error('[Agnes] Status request failed.');
 
-  } catch (err) {
-    throw toAgnesError(err);
-  }
-}
-
-// ============================================================
-// ERROR HANDLING
-// ============================================================
-
-function toAgnesError(err) {
-  // --------------------------------------------------------
-  // Agnes HTTP error
-  // --------------------------------------------------------
-
-  if (err.response) {
-    const status =
-      err.response.status;
-
-    const retryAfterHeader =
-      err.response.headers
-        ? err.response.headers[
-            'retry-after'
-          ]
-        : undefined;
-
-    const retryAfter =
-      retryAfterHeader
-        ? Number(
-            retryAfterHeader
-          )
-        : status === 429
-        ? 60
-        : undefined;
-
-    const messages = {
-      400:
-        'Agnes AI rejected the request — check the prompt and video parameters.',
-
-      401:
-        'Agnes AI authentication failed. Check AGNES_API_KEY in backend/.env.',
-
-      403:
-        'Agnes AI authentication failed. Check AGNES_API_KEY in backend/.env.',
-
-      404:
-        'Video task not found on Agnes AI (it may have expired).',
-
-      429:
-        `Agnes AI rate limit reached — please wait ${
-          retryAfter || 60
-        } seconds before creating another video.`,
-
-      500:
-        'Agnes AI had a server error. Please try again shortly.',
-
-      503:
-        'Agnes AI is busy right now. Please wait and try again shortly.',
-    };
-
-    const message =
-      messages[status] ||
-      `Agnes AI request failed (HTTP ${status}).`;
-
-    const error =
-      new Error(message);
-
-    error.status = status;
-    error.retryAfter =
-      retryAfter;
-
-    error.details =
-      err.response.data;
-
-    return error;
-  }
-
-  // --------------------------------------------------------
-  // Timeout
-  // --------------------------------------------------------
-
-  if (
-    err.code ===
-    'ECONNABORTED'
-  ) {
-    const error =
-      new Error(
-        'Agnes AI request timed out.'
+    if (error.response) {
+      console.error(
+        '[Agnes] HTTP:',
+        error.response.status
       );
 
-    error.status = 504;
+      console.error(
+        '[Agnes] Response:',
+        JSON.stringify(
+          error.response.data,
+          null,
+          2
+        )
+      );
+    } else {
+      console.error(
+        '[Agnes] Error:',
+        error.message
+      );
+    }
 
-    return error;
+    throw error;
   }
-
-  // --------------------------------------------------------
-  // Network / unknown
-  // --------------------------------------------------------
-
-  const error =
-    new Error(
-      'Could not reach Agnes AI. Check your network connection.'
-    );
-
-  error.status = 502;
-
-  return error;
 }
-
-// ============================================================
-// EXPORT
-// ============================================================
 
 module.exports = {
   createVideoTask,
   getVideoStatus,
-  MODEL,
+  extractVideoUrl,
 };
